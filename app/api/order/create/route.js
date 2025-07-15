@@ -18,10 +18,11 @@ export async function POST(request) {
 
 
         //calculate amount using items
-        const amount = await items.reduce(async (acc, item) =>{
-            const product = await Product.findById(item.product);
-            return acc + product.offerPrice * item.quantity;
-        },0)
+      const amount = await items.reduce(async (acc, item) => {
+  const accVal = await acc;
+  const product = await Product.findById(item.product);
+  return accVal + product.offerPrice * item.quantity;
+}, Promise.resolve(0));
 
         await inngest.send({
             name: 'order/created',
