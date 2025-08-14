@@ -14,22 +14,28 @@ export async function POST(request) {
         }
 
         //calculate ammount using items
-        const amount = await items.reduce(async (acc, item) => {
-            const product  = await Product.findById(item.product);
-            return acc + product.offerPrice * item.quantity
-        },0)
+      const amounts = await Promise.all(
+            items.map(async (item) => {
+                const product = await Product.findById(item.product);
+                if (!product) throw new Error(`Product with ID ${item.product} not found`);
+                return product.offerPrice * item.quantity;
+            })
+        );
+
+        const amount = amounts.reduce((a, b) => a + b, 0);
 
 
+           // Kirim event ke Inngest
         await inngest.send({
             name: 'order/created',
-            data:{
+            data: {
                 userId,
                 address,
                 items,
-                amount : amount + Math.floor(amount * 0.02),
+                amount: amount + Math.floor(amount * 0.02), // tambah 2%
                 date: Date.now()
             }
-        })
+        });
 
         // clear user cart
         const user = await User.findById(userId)
