@@ -35,7 +35,7 @@ export async function POST(request) {
                 amount: amount + Math.floor(amount * 0.02), // tambah 2%
                 date: Date.now()
             }
-        });
+        }); 
 
         // clear user cart
         const user = await User.findById(userId)
