@@ -1,52 +1,91 @@
-import { inngest } from "@/config/inngest";
-import Product from "@/models/product";
-import User from "@/models/user"; // WAJIB: tambahkan import User
-import { getAuth } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { Inngest } from "inngest";
+import connectDB from "./db";
+import User from "@/models/user";
+import Order from "@/models/order";
 
-export async function POST(request) {
-    try {
-        const { userId } = getAuth(request);
-        const { address, items } = await request.json();
+// Create a client to send and receive events
+export const inngest = new Inngest({ id: "xlxixsxa4-next" });
 
-        // Validasi input
-        if (!address || !Array.isArray(items) || items.length === 0) {
-            return NextResponse.json({ success: false, message: 'Invalid Data' });
+//inngest function to save user data to database
+export const syncUserCreation = inngest.createFunction(
+    {
+    id:'sync-user-from-clerk'
+    },
+    { event: 'clerk/user.created'},
+    async ({event}) => {
+        const { id, first_name, last_name, email_addresses, image_url } = event.data
+        const userData = {
+            _id:id,
+            email: email_addresses[0].email_address,
+            name: first_name + ' ' + last_name,
+            imageUrl: image_url
         }
-
-        // Hitung total amount
-        const amounts = await Promise.all(
-            items.map(async (item) => {
-                const product = await Product.findById(item.product);
-                if (!product) throw new Error(`Product with ID ${item.product} not found`);
-                return product.offerPrice * item.quantity;
-            })
-        );
-        const amount = amounts.reduce((a, b) => a + b, 0);
-
-        // Kirim event ke Inngest
-        await inngest.send({
-            name: 'order/created',
-            data: {
-                userId,
-                address,
-                items,
-                amount: amount + Math.floor(amount * 0.02), // tambah 2%
-                date: Date.now()
-            }
-        });
-
-        // Clear user cart
-        const user = await User.findById(userId);
-        if (user) {
-            user.cartItems = []; // Kosongkan array cart
-            await user.save();
-        }
-
-        return NextResponse.json({ success: true, message: 'Order Placed' });
-
-    } catch (error) {
-        console.error(error);
-        return NextResponse.json({ success: false, message: error.message });
+        await connectDB()
+        await User.create(userData)
     }
-}
+)
+
+//inngest function to update user data in database
+export const syncUserUpdation = inngest.createFunction(
+    {
+        id: 'update-user-from-clerk'
+    },
+        {event: 'clerk/user.updated'},
+        async ({event}) => {
+            const { id, first_name, last_name, email_addresses, image_url } = event.data
+        const userData = {
+            _id:id,
+            email: email_addresses[0].email_address,
+            name: first_name + ' ' + last_name,
+            imageUrl: image_url
+        }
+        await connectDB()
+        await User.findByIdAndUpdate(id,userData)
+        }
+)
+
+//inngest function to delete user data in database
+export const syncUserDeletion =inngest.createFunction(
+    {
+        id: 'delete-user-with-clerk'
+    },
+        {event: 'clerk/user.deleted'},
+        async ({event}) => {
+            const {id } = event.data
+       
+        await connectDB()
+        await User.findByIdAndDelete(id)
+        }
+)
+
+
+// Inngest Function to create user's order in database
+
+export const createUserOrder = inngest.createFunction(
+    {
+        id:'create-user-order',
+        batchEvents: {
+            maxSize: 5,
+            timeout:'5s'
+        }
+    },
+    {event: 'order/created'},
+    async({events}) => {
+
+        const orders = events.map((event) =>{
+            return{
+                userId: event.data.userId,
+                items: event.data.items,
+                amount: event.data.amount,
+                address: event.data.address,
+                date: event.data.date
+            }
+        })
+
+        await connectDB()
+        await Order.insertMany(orders)
+
+        return { success: true, processed: orders.length };
+
+    }
+)
